@@ -8,9 +8,9 @@ const programs = [
   ['Eva Marie Learning Hub & Mobile Library', 'eva-marie-learning-hub'],
   ['Coding & Robotics', 'coding-robotics'],
   ['Domboshava Education Assistance', 'domboshava-education-assistance'],
-  ['Better Together — Women’s Livelihoods', 'better-together'],
+  ['Better Together: Women’s Livelihoods', 'better-together'],
   ['Healthcare Training & Access', 'healthcare-training-access'],
-  ['I Am Zimbabwe Riddim — Music & Arts', 'iam-zimbabwe-riddim'],
+  ['I Am Zimbabwe Riddim: Music & Arts', 'iam-zimbabwe-riddim'],
   ['Preschool Adoption', 'preschool-adoption'],
   ['Ruwa Home', 'ruwa-home'],
 ];
