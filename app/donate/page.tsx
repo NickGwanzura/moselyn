@@ -1,0 +1,4 @@
+import type { Metadata } from 'next';
+import DonationCheckout from './donation-checkout';
+export const metadata: Metadata = { title: 'Donate | Finding Hope Africa' };
+export default function DonatePage(){return <main><section className="page-hero clay-hero"><p className="eyebrow light">Donate</p><h1>Help hope<br/><em>take root.</em></h1><p>Your support helps Finding Hope Africa walk alongside Zimbabwe’s vulnerable children and families.</p></section><section className="donate-content"><div><p className="eyebrow">Give or get involved</p><h2>Be part of<br/>the story.</h2><p>Choose a one-time gift. Your payment will be securely processed through Authorize.Net.</p><p className="nonprofit-note">Finding Hope Africa is a registered 501(c)(3) nonprofit, EIN 82-4311719.</p><a className="text-link" href="mailto:info@findinghopeafrica.org?subject=Supporting%20Finding%20Hope%20Africa">Questions? Contact us <span>↗</span></a></div><DonationCheckout/></section></main>}
