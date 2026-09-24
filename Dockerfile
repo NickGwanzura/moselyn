@@ -16,6 +16,7 @@ ENV PORT=3000
 
 WORKDIR /app
 COPY --from=builder --chown=node:node /app/dist/standalone ./
+COPY --from=builder --chown=node:node /app/node_modules ./node_modules
 
 USER node
 EXPOSE 3000
