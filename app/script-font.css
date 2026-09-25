@@ -1,0 +1,45 @@
+.hero h1.script-heading {
+  font-family: 'Quentin Script', 'Quentin', cursive;
+  font-size: clamp(64px, 8vw, 112px);
+  font-style: normal;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.08;
+}
+
+.impact-intro h2.script-heading,
+.story-copy h2.script-heading,
+.section-heading h2.script-heading {
+  font-family: 'Quentin Script', 'Quentin', cursive;
+  font-size: clamp(44px, 5.2vw, 72px);
+  font-style: normal;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.14;
+}
+
+.script-heading em,
+.script-heading span {
+  font-style: normal;
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: 'Quentin Script';
+  src: url('/fonts/Quentin.otf') format('opentype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@media (max-width: 600px) {
+  .hero h1.script-heading {
+    font-size: clamp(58px, 15vw, 74px);
+  }
+
+  .impact-intro h2.script-heading,
+  .story-copy h2.script-heading,
+  .section-heading h2.script-heading {
+    font-size: clamp(42px, 11vw, 56px);
+  }
+}
