@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
+import Link from './site-link';
 import { ArrowUpRight, BriefcaseBusiness, Camera, ChevronDown, Menu, UsersRound, X } from 'lucide-react';
 
 const programs = [

@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { ArrowUpRight } from 'lucide-react';
-import Link from 'next/link';
+import Link from '../../components/site-link';
 import { blogStories } from '../../lib/blog-stories';
 export const metadata: Metadata = { title: 'Our Impact | Finding Hope Africa' };
 export default function ImpactPage(){return <main>

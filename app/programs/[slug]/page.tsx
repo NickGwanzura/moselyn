@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { ArrowLeft, ArrowUpRight } from 'lucide-react';
-import Link from 'next/link';
+import Link from '../../../components/site-link';
 import { fhaPrograms } from '../../../lib/programs';
 
 type PageProps = { params: Promise<{ slug: string }> };

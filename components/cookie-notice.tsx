@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import Link from './site-link';
 
 const noticeKey = 'fha-cookie-notice-dismissed';
 

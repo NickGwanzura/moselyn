@@ -1,6 +1,6 @@
 'use client';
 import { ArrowUpRight, BookOpen, CalendarDays, Code2, GraduationCap, HeartHandshake, Play, UsersRound } from 'lucide-react';
-import Link from 'next/link';
+import Link from '../components/site-link';
 import { blogStories } from '../lib/blog-stories';
 const impactStats = [
   { value: '1,000+', label: 'Students supported with books, food, and school fees', icon: BookOpen },
