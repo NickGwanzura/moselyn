@@ -1,6 +1,6 @@
-import type { Metadata } from 'next';
+import { createPageMetadata } from '../../lib/seo';
 
-export const metadata: Metadata = { title: 'Terms of Use | Finding Hope Africa' };
+export const metadata = createPageMetadata({ title: 'Terms of Use', description: 'Terms for using the Finding Hope Africa website and its donation and information services.', path: '/terms' });
 
 export default function TermsPage() {
   return <main className="legal-page">

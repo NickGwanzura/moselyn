@@ -1,8 +1,8 @@
-import type { Metadata } from 'next';
 import { ArrowUpRight } from 'lucide-react';
 import Link from '../../components/site-link';
 import { blogStories } from '../../lib/blog-stories';
-export const metadata: Metadata = { title: 'Our Impact | Finding Hope Africa' };
+import { createPageMetadata } from '../../lib/seo';
+export const metadata = createPageMetadata({ title: 'Our Impact', description: 'See how Finding Hope Africa walks alongside children, young people, women, and families through education, shelter, healthcare, livelihoods, and the arts.', path: '/impact' });
 export default function ImpactPage(){return <main>
  <section className="page-hero impact-hero"><p className="eyebrow">About us</p><h1 className="script-heading">Our Impact</h1><p className="impact-hero-subtitle">Life change in Zimbabwe begins with a relationship.</p><p>Finding Hope Africa walks alongside children, young people, women, and families through education, safe shelter, healthcare access, livelihoods, and the creative arts. We respond to immediate needs while investing in the people and local leaders who can carry hope forward in their own communities.</p></section>
  <section className="monthly-section"><div className="monthly-intro"><p className="eyebrow">Updates from the field</p><h2 className="script-heading">Finding Hope Monthly</h2><p>A closer look at what happened this month.</p></div><div className="flipbook-placeholder" role="img" aria-label="Monthly PDF publication viewer placeholder"><div className="flipbook-cover"><span>Finding Hope Monthly</span><small>A closer look at what happened this month</small><span className="asset-pending">Monthly issue PDF pending</span></div><div className="flipbook-message"><span className="eyebrow">Monthly publication</span><h3>Read the latest issue</h3><p>The page-turning reader will be connected when the first monthly PDF is ready.</p><button className="button button-dark" type="button" disabled>Open the latest issue</button></div></div></section>

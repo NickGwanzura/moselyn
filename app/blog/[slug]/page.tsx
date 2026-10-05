@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowUpRight } from 'lucide-react';
 import Link from '../../../components/site-link';
 import { notFound } from 'next/navigation';
 import { blogStories } from '../../../lib/blog-stories';
+import { createPageMetadata } from '../../../lib/seo';
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -13,7 +14,15 @@ export function generateStaticParams() {
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
   const story = blogStories.find((item) => item.slug === slug);
-  return { title: story ? `${story.title} | Finding Hope Africa` : 'Story | Finding Hope Africa' };
+  const description = story?.paragraphs[0] ?? 'Stories and programme updates from Finding Hope Africa in Zimbabwe.';
+  return createPageMetadata({
+    title: story?.title ?? 'Story',
+    description: description.length > 160 ? `${description.slice(0, 157).trimEnd()}…` : description,
+    path: `/blog/${slug}`,
+    image: story?.image,
+    imageAlt: story ? `${story.tag} update from Finding Hope Africa` : undefined,
+    type: 'article',
+  });
 }
 
 export default async function BlogStoryPage({ params }: PageProps) {

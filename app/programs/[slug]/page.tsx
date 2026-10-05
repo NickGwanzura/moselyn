@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { ArrowLeft, ArrowUpRight } from 'lucide-react';
 import Link from '../../../components/site-link';
 import { fhaPrograms } from '../../../lib/programs';
+import { createPageMetadata } from '../../../lib/seo';
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -13,7 +14,11 @@ export function generateStaticParams() {
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
   const program = fhaPrograms.find((item) => item.slug === slug);
-  return { title: program ? `${program.title} | Finding Hope Africa` : 'Programme | Finding Hope Africa' };
+  return createPageMetadata({
+    title: program?.title ?? 'Programme',
+    description: program?.summary ?? 'Learn about Finding Hope Africa programmes and community work in Zimbabwe.',
+    path: `/programs/${slug}`,
+  });
 }
 
 export default async function ProgramDetailPage({ params }: PageProps) {

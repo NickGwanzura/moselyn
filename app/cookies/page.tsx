@@ -1,6 +1,6 @@
-import type { Metadata } from 'next';
+import { createPageMetadata } from '../../lib/seo';
 
-export const metadata: Metadata = { title: 'Cookie Policy | Finding Hope Africa' };
+export const metadata = createPageMetadata({ title: 'Cookie Policy', description: 'Learn how Finding Hope Africa uses browser storage, cookies, and third-party content on this website.', path: '/cookies' });
 
 export default function CookiePolicyPage() {
   return <main className="legal-page">
