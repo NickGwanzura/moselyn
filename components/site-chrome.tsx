@@ -26,7 +26,7 @@ export function SiteHeader() {
     <nav className={menuOpen ? 'nav open' : 'nav'} aria-label="Main navigation">
       <div className="nav-item has-menu"><button type="button" onClick={() => setAboutOpen(!aboutOpen)} aria-expanded={aboutOpen}>About Us <ChevronDown size={15}/></button><div className={aboutOpen ? 'dropdown small visible' : 'dropdown small'}><Link href="/about">Our Story</Link><Link href="/impact">Our Impact</Link><Link href="/founders">Our Founders</Link></div></div>
       <div className="nav-item has-menu"><button onClick={() => setProgramsOpen(!programsOpen)} aria-expanded={programsOpen}>What We Do <ChevronDown size={15}/></button><div className={programsOpen ? 'dropdown programs visible' : 'dropdown programs'}><Link href="/programs">All Programmes</Link>{programs.map(([label, slug]) => <Link href={`/programs/${slug}`} key={label}>{label}</Link>)}</div></div>
-      <Link href="/blog">Our Blog</Link><Link href="/contact">Contact Us</Link><Link className="nav-donate" href="/donate">Donate Now <ArrowUpRight size={16}/></Link>
+      <Link href="/blog">Our Blog</Link><Link href="/contact">Contact Us</Link><Link className="nav-admin" href="/admin">Admin</Link><Link className="nav-donate" href="/donate">Donate Now <ArrowUpRight size={16}/></Link>
     </nav>
   </header>;
 }

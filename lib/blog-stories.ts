@@ -1,10 +1,14 @@
 export type BlogStory = {
+  id?: string;
   slug: string;
   title: string;
   tag: string;
   image: string;
   programSlug: string;
   paragraphs: readonly string[];
+  excerpt?: string;
+  status?: 'draft' | 'published';
+  publishedAt?: string | null;
 };
 
 // Shared by the homepage and blog index so story cards stay in sync.

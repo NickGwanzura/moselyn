@@ -1,7 +1,9 @@
-'use client';
 import { ArrowUpRight, BookOpen, CalendarDays, Code2, GraduationCap, HeartHandshake, Play, UsersRound } from 'lucide-react';
 import Link from '../components/site-link';
-import { blogStories } from '../lib/blog-stories';
+import { getPublishedBlogPosts } from '../lib/backend-db';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 const impactStats = [
   { value: '1,000+', label: 'Students supported with books, food, and school fees', icon: BookOpen },
   { value: '200+', label: 'Women engaged in livelihoods training', icon: HeartHandshake },
@@ -10,7 +12,8 @@ const impactStats = [
   { value: '491+', label: 'Beneficiaries across FHA education programmes', icon: UsersRound },
   { value: '10+', label: 'Years of continuous operation since founding', icon: CalendarDays },
 ];
-export default function Home(){
+export default async function Home(){
+ const blogStories = await getPublishedBlogPosts();
  return <main>
   <section id="top" className="hero"><div className="hero-image"/><div className="hero-overlay"/><div className="hero-content"><p className="eyebrow light">Zimbabwe · Since 2015</p><h1 className="script-heading">Rescue.<br/><em>Rebuild.</em><br/>Reintegrate.</h1><p className="hero-copy">We walk with Zimbabwe’s orphaned, poor and vulnerable children and families until each one finds hope and a purpose.</p><a className="button button-primary" href="#impact">Our Impact <ArrowUpRight size={17}/></a></div><div className="hero-note">One life at a time <span>↓</span></div></section>
   <section id="impact" className="impact-band"><div className="impact-heading"><div className="impact-intro"><p className="eyebrow light">Our impact</p><h2 className="script-heading">Finding Hope<br/><span>Together</span></h2></div><a className="button button-light" href="/impact">Our Impact <ArrowUpRight size={17}/></a></div><div className="stats">{impactStats.map(({value,label,icon:Icon})=><div className="stat-card" key={value}><div className="stat-card-heading"><Icon aria-hidden="true" size={19} strokeWidth={1.8}/><strong>{value}</strong></div><span>{label}</span></div>)}</div></section>

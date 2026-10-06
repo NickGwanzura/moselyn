@@ -1,5 +1,32 @@
 # vinext-starter
 
+## FHA admin backend (Dokploy + Cloudflare R2)
+
+The private editor is available at `/admin`. It supports draft/published stories, edits, cover-image uploads to R2, and deletion. The dashboard shows donation totals and recent checkout statuses. Card details are never stored by this application.
+
+### Required production configuration
+
+Create a PostgreSQL service in Dokploy and add these variables to the website service. Use the database's private/internal URL where possible:
+
+- `DATABASE_URL` (PostgreSQL connection string)
+- `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_SESSION_SECRET` (use a unique admin password and a random session secret at least 32 characters long)
+- `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `R2_PUBLIC_BASE_URL`
+- `AUTHORIZE_NET_API_LOGIN_ID`, `AUTHORIZE_NET_TRANSACTION_KEY`, `AUTHORIZE_NET_SIGNATURE_KEY`, `AUTHORIZE_NET_MODE`
+
+Copy `.env.example` as a reference only; do not commit real credentials. Set `DATABASE_SSL=true` only if the PostgreSQL service requires TLS. The schema is initialized automatically on first backend use; to apply it manually, run `npm run db:setup` with `DATABASE_URL` set.
+
+In Cloudflare, create an R2 bucket and an API token with object read/write permissions limited to that bucket. Connect a public custom domain to the bucket and set `R2_PUBLIC_BASE_URL` to that HTTPS origin (without a trailing slash). Restrict CORS to `https://findinghopeafrica.org` if browser access requires it; image writes happen server-side.
+
+In the Authorize.Net merchant portal, create a webhook subscription for payment transaction events (auth/capture, refund, void, and fraud review) pointing to:
+
+`https://findinghopeafrica.org/api/webhooks/authorize-net`
+
+Copy the webhook's Signature Key into `AUTHORIZE_NET_SIGNATURE_KEY`. The checkout sends a unique merchant `refId`; Authorize.Net returns it as `merchantReferenceId` in transaction events. The endpoint verifies the signed raw request, matches its reference and amount to the pending checkout, and processes notification IDs idempotently. A gift is counted as completed only when Authorize.Net reports an approved capture or a held payment is later approved. Use sandbox mode and a sandbox webhook subscription for end-to-end testing before setting `AUTHORIZE_NET_MODE=production`.
+
+Admin sign-in is at `https://findinghopeafrica.org/admin`. It uses an HttpOnly, Secure (on HTTPS), SameSite=Strict 12-hour session cookie and throttles failed sign-in attempts. The login identity is a single configured email/password pair. Configure Dokploy backups for PostgreSQL and Cloudflare R2 lifecycle/versioning according to FHA's retention needs.
+
+Until `DATABASE_URL` is configured, public pages continue to use the existing bundled sample stories; uploads and donation tracking require the backend services above.
+
 A clean full-stack starter running on [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and Drizzle support.
 
 ## Prerequisites

@@ -1,3 +1,8 @@
+import { randomUUID } from 'node:crypto';
+import { createDonation, setDonationStatus } from '../../../../lib/backend-db';
+
+export const runtime = 'nodejs';
+
 const API_URLS = {
   sandbox: 'https://apitest.authorize.net/xml/v1/request.api',
   production: 'https://api.authorize.net/xml/v1/request.api',
@@ -29,13 +34,15 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Choose an amount from $1 to $10,000 USD.' }, { status: 400 });
   }
 
+  const reference = `FHA${randomUUID().replaceAll('-', '').slice(0, 16).toUpperCase()}`;
   const payload = {
     getHostedPaymentPageRequest: {
       merchantAuthentication: { name: loginId, transactionKey },
+      refId: reference,
       transactionRequest: {
         transactionType: 'authCaptureTransaction',
         amount: amount.toFixed(2),
-        order: { description: 'Donation to Finding Hope Africa' },
+        order: { invoiceNumber: reference, description: 'Donation to Finding Hope Africa' },
       },
       hostedPaymentSettings: {
         setting: [
@@ -50,6 +57,13 @@ export async function POST(request: Request) {
   };
 
   try {
+    await createDonation(amount, reference);
+  } catch (error) {
+    console.error('Could not record donation checkout:', error);
+    return Response.json({ error: 'Donation tracking is not configured yet. Please contact Finding Hope Africa.' }, { status: 503 });
+  }
+
+  try {
     const gatewayResponse = await fetch(API_URLS[mode], {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -62,11 +76,13 @@ export async function POST(request: Request) {
     };
     if (result.messages?.resultCode !== 'Ok' || !result.token) {
       console.error('Authorize.Net did not issue a hosted checkout token.');
+      await setDonationStatus(reference, 'failed');
       return Response.json({ error: 'Authorize.Net could not start checkout. Please try again or contact us.' }, { status: 502 });
     }
     return Response.json({ token: result.token, paymentUrl: PAYMENT_URLS[mode] }, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     console.error('Authorize.Net checkout token request failed:', error);
+    await setDonationStatus(reference, 'failed').catch((databaseError) => console.error('Could not update failed checkout:', databaseError));
     return Response.json({ error: 'We could not connect to Authorize.Net. Please try again shortly.' }, { status: 502 });
   }
 }

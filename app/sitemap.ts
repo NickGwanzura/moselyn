@@ -1,5 +1,5 @@
 import type { MetadataRoute } from 'next';
-import { blogStories } from '../lib/blog-stories';
+import { getPublishedBlogPosts } from '../lib/backend-db';
 import { fhaPrograms } from '../lib/programs';
 import { SITE_URL } from '../lib/seo';
 
@@ -16,7 +16,11 @@ const staticRoutes = [
   '/cookies',
 ];
 
-export default function sitemap(): MetadataRoute.Sitemap {
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  const blogStories = await getPublishedBlogPosts();
   return [
     ...staticRoutes.map((path) => ({ url: new URL(path, SITE_URL).toString() })),
     ...fhaPrograms.map(({ slug }) => ({ url: new URL(`/programs/${slug}`, SITE_URL).toString() })),

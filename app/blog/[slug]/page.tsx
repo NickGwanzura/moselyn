@@ -2,18 +2,17 @@ import type { Metadata } from 'next';
 import { ArrowLeft, ArrowUpRight } from 'lucide-react';
 import Link from '../../../components/site-link';
 import { notFound } from 'next/navigation';
-import { blogStories } from '../../../lib/blog-stories';
+import { getBlogPostBySlug } from '../../../lib/backend-db';
 import { createPageMetadata } from '../../../lib/seo';
 
 type PageProps = { params: Promise<{ slug: string }> };
 
-export function generateStaticParams() {
-  return blogStories.map(({ slug }) => ({ slug }));
-}
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
-  const story = blogStories.find((item) => item.slug === slug);
+  const story = await getBlogPostBySlug(slug);
   const description = story?.paragraphs[0] ?? 'Stories and programme updates from Finding Hope Africa in Zimbabwe.';
   return createPageMetadata({
     title: story?.title ?? 'Story',
@@ -27,7 +26,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
 export default async function BlogStoryPage({ params }: PageProps) {
   const { slug } = await params;
-  const story = blogStories.find((item) => item.slug === slug);
+  const story = await getBlogPostBySlug(slug);
   if (!story) notFound();
 
   return <main>
