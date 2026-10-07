@@ -24,6 +24,7 @@ export type DonationRecord = {
 };
 
 export type AdminInvite = { email: string; expiresAt: string; createdAt: string };
+export type AdminUser = { email: string; invitedBy: string; createdAt: string };
 export type ContactEnquiry = { id: string; name: string; email: string; subject: string; message: string; createdAt: string; alertSentAt: string | null; status: 'new' | 'in_progress' | 'resolved'; assignedTo: string | null };
 export type BlogAnalytics = {
   totalViews: number;
@@ -366,6 +367,33 @@ export async function listAdminInvites(): Promise<AdminInvite[]> {
   await ensureDatabase();
   const result = await getPool().query('SELECT email, expires_at, created_at FROM admin_invites WHERE accepted_at IS NULL AND expires_at > NOW() ORDER BY created_at DESC');
   return result.rows.map((row: DbRow) => ({ email: String(row.email), expiresAt: new Date(String(row.expires_at)).toISOString(), createdAt: new Date(String(row.created_at)).toISOString() }));
+}
+
+export async function listAdminUsers(): Promise<AdminUser[]> {
+  await ensureDatabase();
+  const result = await getPool().query('SELECT email, invited_by, created_at FROM admin_users WHERE active = TRUE ORDER BY created_at ASC');
+  return result.rows.map((row: DbRow) => ({ email: String(row.email), invitedBy: String(row.invited_by), createdAt: new Date(String(row.created_at)).toISOString() }));
+}
+
+export async function deleteAdminUser(email: string): Promise<'deleted' | 'not_found' | 'last_admin'> {
+  await ensureDatabase();
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('LOCK TABLE admin_users IN EXCLUSIVE MODE');
+    const found = await client.query('SELECT email FROM admin_users WHERE email = $1 AND active = TRUE FOR UPDATE', [email]);
+    if (!found.rowCount) { await client.query('ROLLBACK'); return 'not_found'; }
+    const count = await client.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM admin_users WHERE active = TRUE');
+    const hasConfiguredOwner = Boolean(process.env.ADMIN_EMAIL?.trim() && process.env.ADMIN_PASSWORD);
+    if (!hasConfiguredOwner && Number(count.rows[0]?.count ?? 0) <= 1) { await client.query('ROLLBACK'); return 'last_admin'; }
+    await client.query('UPDATE contact_enquiries SET assigned_to = NULL WHERE assigned_to = $1', [email]);
+    await client.query('DELETE FROM admin_users WHERE email = $1', [email]);
+    await client.query('COMMIT');
+    return 'deleted';
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally { client.release(); }
 }
 
 export async function checkContactRateLimit(ipHash: string): Promise<boolean> {
