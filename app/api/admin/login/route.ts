@@ -22,7 +22,13 @@ export async function POST(request: Request) {
   }
   const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
   const password = typeof body.password === 'string' ? body.password : '';
-  if (!email || !password || email !== process.env.ADMIN_EMAIL?.trim().toLowerCase() || !verifyPassword(password)) {
+  let validCredentials = false;
+  try { validCredentials = Boolean(email && password && await verifyPassword(email, password)); }
+  catch (error) {
+    console.error('Admin credentials could not be checked:', error);
+    return Response.json({ error: 'Admin sign-in is not configured.' }, { status: 503 });
+  }
+  if (!validCredentials) {
     await noteFailedLogin(identityHash);
     return Response.json({ error: 'Email or password is incorrect.' }, { status: 401 });
   }

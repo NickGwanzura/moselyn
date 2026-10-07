@@ -22,6 +22,9 @@ export type DonationRecord = {
   updatedAt: string;
 };
 
+export type AdminInvite = { email: string; expiresAt: string; createdAt: string };
+export type ContactEnquiry = { id: string; name: string; email: string; subject: string; message: string; createdAt: string; alertSentAt: string | null };
+
 type DbRow = Record<string, unknown>;
 const globalForPool = globalThis as typeof globalThis & { fhaPool?: Pool; fhaSchemaReady?: Promise<void> };
 
@@ -83,7 +86,45 @@ export async function ensureDatabase(): Promise<void> {
         attempt_count INTEGER NOT NULL DEFAULT 0,
         window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+      CREATE TABLE IF NOT EXISTS admin_users (
+        email VARCHAR(254) PRIMARY KEY,
+        password_hash TEXT NOT NULL,
+        invited_by VARCHAR(254) NOT NULL,
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS admin_invites (
+        token_hash CHAR(64) PRIMARY KEY,
+        email VARCHAR(254) NOT NULL,
+        created_by VARCHAR(254) NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        accepted_at TIMESTAMPTZ
+      );
+      CREATE INDEX IF NOT EXISTS admin_invites_email_idx ON admin_invites (email, created_at DESC);
+      CREATE TABLE IF NOT EXISTS contact_enquiries (
+        id TEXT PRIMARY KEY,
+        name VARCHAR(120) NOT NULL,
+        email VARCHAR(254) NOT NULL,
+        subject VARCHAR(160) NOT NULL,
+        message TEXT NOT NULL,
+        ip_hash CHAR(64) NOT NULL,
+        alert_sent_at TIMESTAMPTZ,
+        alert_error TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS contact_enquiries_created_idx ON contact_enquiries (created_at DESC);
+      CREATE TABLE IF NOT EXISTS contact_rate_limits (
+        ip_hash CHAR(64) PRIMARY KEY,
+        submission_count INTEGER NOT NULL DEFAULT 0,
+        window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS backend_migrations (version VARCHAR(120) PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+      ALTER TABLE donations ADD COLUMN IF NOT EXISTS alert_sent_at TIMESTAMPTZ;
+      ALTER TABLE donations ADD COLUMN IF NOT EXISTS alert_error TEXT;
     `);
+    const baseline = await pool.query("INSERT INTO backend_migrations (version) VALUES ('donation-alert-baseline-v1') ON CONFLICT DO NOTHING RETURNING version");
+    if (baseline.rowCount) await pool.query("UPDATE donations SET alert_sent_at = NOW() WHERE status = 'completed' AND alert_sent_at IS NULL");
     const count = await pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM blog_posts');
     if (count.rows[0]?.count === '0') {
       for (const post of blogStories) {
@@ -168,6 +209,100 @@ export async function setDonationStatus(reference: string, status: DonationRecor
   await getPool().query('UPDATE donations SET status = $2, updated_at = NOW() WHERE reference = $1 AND status = $3', [reference, status, 'pending']);
 }
 
+export async function createAdminInvite(input: { tokenHash: string; email: string; createdBy: string; expiresAt: Date }): Promise<void> {
+  await ensureDatabase();
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM admin_invites WHERE email = $1 AND accepted_at IS NULL', [input.email]);
+    await client.query('INSERT INTO admin_invites (token_hash, email, created_by, expires_at) VALUES ($1, $2, $3, $4)', [input.tokenHash, input.email, input.createdBy, input.expiresAt]);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally { client.release(); }
+}
+
+export async function revokeAdminInvite(tokenHash: string): Promise<void> {
+  await ensureDatabase();
+  await getPool().query('DELETE FROM admin_invites WHERE token_hash = $1 AND accepted_at IS NULL', [tokenHash]);
+}
+
+export async function acceptAdminInvite(tokenHash: string, passwordHash: string): Promise<string | null> {
+  await ensureDatabase();
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const invite = await client.query<{ email: string; created_by: string }>(
+      'SELECT email, created_by FROM admin_invites WHERE token_hash = $1 AND accepted_at IS NULL AND expires_at > NOW() FOR UPDATE', [tokenHash]);
+    if (!invite.rowCount) { await client.query('ROLLBACK'); return null; }
+    const { email, created_by: createdBy } = invite.rows[0];
+    await client.query('INSERT INTO admin_users (email, password_hash, invited_by) VALUES ($1, $2, $3) ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, active = TRUE', [email, passwordHash, createdBy]);
+    await client.query('UPDATE admin_invites SET accepted_at = NOW() WHERE token_hash = $1', [tokenHash]);
+    await client.query('COMMIT');
+    return email;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally { client.release(); }
+}
+
+export async function getActiveAdminPasswordHash(email: string): Promise<string | null> {
+  await ensureDatabase();
+  const result = await getPool().query<{ password_hash: string }>('SELECT password_hash FROM admin_users WHERE email = $1 AND active = TRUE', [email]);
+  return result.rows[0]?.password_hash ?? null;
+}
+
+export async function isActiveAdmin(email: string): Promise<boolean> {
+  await ensureDatabase();
+  const result = await getPool().query('SELECT 1 FROM admin_users WHERE email = $1 AND active = TRUE', [email]);
+  return Boolean(result.rowCount);
+}
+
+export async function listAdminInvites(): Promise<AdminInvite[]> {
+  await ensureDatabase();
+  const result = await getPool().query('SELECT email, expires_at, created_at FROM admin_invites WHERE accepted_at IS NULL AND expires_at > NOW() ORDER BY created_at DESC');
+  return result.rows.map((row: DbRow) => ({ email: String(row.email), expiresAt: new Date(String(row.expires_at)).toISOString(), createdAt: new Date(String(row.created_at)).toISOString() }));
+}
+
+export async function checkContactRateLimit(ipHash: string): Promise<boolean> {
+  await ensureDatabase();
+  const result = await getPool().query<{ submission_count: number }>(
+    `INSERT INTO contact_rate_limits (ip_hash, submission_count, window_started_at) VALUES ($1, 1, NOW())
+     ON CONFLICT (ip_hash) DO UPDATE SET
+       submission_count = CASE WHEN contact_rate_limits.window_started_at < NOW() - INTERVAL '1 hour' THEN 1 ELSE contact_rate_limits.submission_count + 1 END,
+       window_started_at = CASE WHEN contact_rate_limits.window_started_at < NOW() - INTERVAL '1 hour' THEN NOW() ELSE contact_rate_limits.window_started_at END
+     RETURNING submission_count`, [ipHash]);
+  return Number(result.rows[0]?.submission_count ?? 99) <= 5;
+}
+
+export async function createContactEnquiry(input: Omit<ContactEnquiry, 'createdAt' | 'alertSentAt'> & { ipHash: string }): Promise<void> {
+  await ensureDatabase();
+  await getPool().query('INSERT INTO contact_enquiries (id, name, email, subject, message, ip_hash) VALUES ($1, $2, $3, $4, $5, $6)', [input.id, input.name, input.email, input.subject, input.message, input.ipHash]);
+}
+
+export async function markContactAlert(id: string, error?: string): Promise<void> {
+  await ensureDatabase();
+  await getPool().query('UPDATE contact_enquiries SET alert_sent_at = CASE WHEN $2::text IS NULL THEN NOW() ELSE alert_sent_at END, alert_error = $2 WHERE id = $1', [id, error?.slice(0, 500) ?? null]);
+}
+
+export async function getRecentContactEnquiries(): Promise<ContactEnquiry[]> {
+  await ensureDatabase();
+  const result = await getPool().query('SELECT id, name, email, subject, message, created_at, alert_sent_at FROM contact_enquiries ORDER BY created_at DESC LIMIT 100');
+  return result.rows.map((row: DbRow) => ({ id: String(row.id), name: String(row.name), email: String(row.email), subject: String(row.subject), message: String(row.message), createdAt: new Date(String(row.created_at)).toISOString(), alertSentAt: row.alert_sent_at ? new Date(String(row.alert_sent_at)).toISOString() : null }));
+}
+
+export async function getPendingDonationAlerts(): Promise<Array<{ reference: string; amount: string; transactionId: string | null; createdAt: string }>> {
+  await ensureDatabase();
+  const result = await getPool().query("SELECT reference, amount::text, transaction_id, created_at FROM donations WHERE status = 'completed' AND alert_sent_at IS NULL ORDER BY created_at ASC LIMIT 25");
+  return result.rows.map((row: DbRow) => ({ reference: String(row.reference), amount: String(row.amount), transactionId: row.transaction_id ? String(row.transaction_id) : null, createdAt: new Date(String(row.created_at)).toISOString() }));
+}
+
+export async function markDonationAlert(reference: string, error?: string): Promise<void> {
+  await ensureDatabase();
+  await getPool().query('UPDATE donations SET alert_sent_at = CASE WHEN $2::text IS NULL THEN NOW() ELSE alert_sent_at END, alert_error = $2 WHERE reference = $1', [reference, error?.slice(0, 500) ?? null]);
+}
+
 export async function getDonationDashboard(): Promise<{ totalCompleted: string; completedCount: number; pendingCount: number; recent: DonationRecord[] }> {
   await ensureDatabase();
   const pool = getPool();
@@ -224,8 +359,10 @@ export async function recordAuthorizeNetEvent(input: {
       : isCapture && input.responseCode === '4' ? 'held'
       : isCapture && input.responseCode === '3' ? 'failed' : null;
     if (eventStatus) {
-      await client.query(`UPDATE donations SET status = $2, transaction_id = COALESCE(transaction_id, $3), gateway_response_code = $4, updated_at = NOW()
-        WHERE reference = $1`, [input.reference, eventStatus, input.transactionId, input.responseCode]);
+      await client.query(`UPDATE donations SET status = $2, transaction_id = COALESCE(transaction_id, $3), gateway_response_code = $4,
+        alert_sent_at = CASE WHEN $2 = 'completed' AND status <> 'completed' THEN NULL ELSE alert_sent_at END,
+        alert_error = CASE WHEN $2 = 'completed' AND status <> 'completed' THEN NULL ELSE alert_error END,
+        updated_at = NOW() WHERE reference = $1`, [input.reference, eventStatus, input.transactionId, input.responseCode]);
     }
     await client.query('COMMIT');
     return 'recorded';

@@ -10,6 +10,7 @@ Create a PostgreSQL service in Dokploy and add these variables to the website se
 
 - `DATABASE_URL` (PostgreSQL connection string)
 - `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_SESSION_SECRET` (use a unique admin password and a random session secret at least 32 characters long)
+- `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `ADMIN_ALERT_EMAIL`, `PUBLIC_SITE_URL` (Resend key, verified sender, inbox for alerts, and public origin)
 - `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `R2_PUBLIC_BASE_URL`
 - `AUTHORIZE_NET_API_LOGIN_ID`, `AUTHORIZE_NET_TRANSACTION_KEY`, `AUTHORIZE_NET_SIGNATURE_KEY`, `AUTHORIZE_NET_MODE`
 
@@ -23,7 +24,9 @@ In the Authorize.Net merchant portal, create a webhook subscription for payment 
 
 Copy the webhook's Signature Key into `AUTHORIZE_NET_SIGNATURE_KEY`. The checkout sends a unique merchant `refId`; Authorize.Net returns it as `merchantReferenceId` in transaction events. The endpoint verifies the signed raw request, matches its reference and amount to the pending checkout, and processes notification IDs idempotently. A gift is counted as completed only when Authorize.Net reports an approved capture or a held payment is later approved. Use sandbox mode and a sandbox webhook subscription for end-to-end testing before setting `AUTHORIZE_NET_MODE=production`.
 
-Admin sign-in is at `https://findinghopeafrica.org/admin`. It uses an HttpOnly, Secure (on HTTPS), SameSite=Strict 12-hour session cookie and throttles failed sign-in attempts. The login identity is a single configured email/password pair. Configure Dokploy backups for PostgreSQL and Cloudflare R2 lifecycle/versioning according to FHA's retention needs.
+Admin sign-in is at `https://findinghopeafrica.org/admin`. It uses an HttpOnly, Secure (on HTTPS), SameSite=Strict 12-hour session cookie and throttles failed sign-in attempts. The configured environment account remains the bootstrap administrator. Signed-in admins can invite additional administrators from `/admin/invites`; invite links expire after 48 hours and each recipient chooses a password. Invitations and enquiries use Resend. Contact messages are saved in PostgreSQL, and paid-donation alerts are sent only after an approved Authorize.Net capture webhook. The hosted donation form does not collect donor email addresses, so donation alerts currently go to `ADMIN_ALERT_EMAIL` (or `ADMIN_EMAIL` if unset), not to donors. Configure Dokploy backups for PostgreSQL and Cloudflare R2 lifecycle/versioning according to FHA's retention needs.
+
+For email delivery, add a Resend API key to Dokploy as `RESEND_API_KEY` (never commit it), set `RESEND_FROM_EMAIL` to a sender on a verified domain, set `ADMIN_ALERT_EMAIL` to the staff inbox, and set `PUBLIC_SITE_URL` to the canonical site origin. Verify the sender domain with Resend before testing invite or alert emails.
 
 Until `DATABASE_URL` is configured, public pages continue to use the existing bundled sample stories; uploads and donation tracking require the backend services above.
 

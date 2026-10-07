@@ -38,3 +38,52 @@ CREATE TABLE IF NOT EXISTS admin_login_attempts (
   attempt_count INTEGER NOT NULL DEFAULT 0,
   window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS admin_users (
+  email VARCHAR(254) PRIMARY KEY,
+  password_hash TEXT NOT NULL,
+  invited_by VARCHAR(254) NOT NULL,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS admin_invites (
+  token_hash CHAR(64) PRIMARY KEY,
+  email VARCHAR(254) NOT NULL,
+  created_by VARCHAR(254) NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  accepted_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS admin_invites_email_idx ON admin_invites (email, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS contact_enquiries (
+  id TEXT PRIMARY KEY,
+  name VARCHAR(120) NOT NULL,
+  email VARCHAR(254) NOT NULL,
+  subject VARCHAR(160) NOT NULL,
+  message TEXT NOT NULL,
+  ip_hash CHAR(64) NOT NULL,
+  alert_sent_at TIMESTAMPTZ,
+  alert_error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS contact_enquiries_created_idx ON contact_enquiries (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS contact_rate_limits (
+  ip_hash CHAR(64) PRIMARY KEY,
+  submission_count INTEGER NOT NULL DEFAULT 0,
+  window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS backend_migrations (version VARCHAR(120) PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+ALTER TABLE donations ADD COLUMN IF NOT EXISTS alert_sent_at TIMESTAMPTZ;
+ALTER TABLE donations ADD COLUMN IF NOT EXISTS alert_error TEXT;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM backend_migrations WHERE version = 'donation-alert-baseline-v1') THEN
+    UPDATE donations SET alert_sent_at = NOW() WHERE status = 'completed' AND alert_sent_at IS NULL;
+    INSERT INTO backend_migrations (version) VALUES ('donation-alert-baseline-v1') ON CONFLICT DO NOTHING;
+  END IF;
+END;
+$$;

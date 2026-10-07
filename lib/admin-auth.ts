@@ -1,9 +1,11 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
+import { promisify } from 'node:util';
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
 const COOKIE_NAME = 'fha_admin_session';
 const SESSION_SECONDS = 60 * 60 * 12;
+const scrypt = promisify(scryptCallback);
 
 function sessionSecret(): string {
   const secret = process.env.ADMIN_SESSION_SECRET;
@@ -34,15 +36,18 @@ export function createAdminSession(email: string): string {
   return `${payload}.${sign(payload)}`;
 }
 
-export function verifyAdminSession(token: string | undefined): boolean {
+export async function verifyAdminSession(token: string | undefined): Promise<boolean> {
   if (!token) return false;
   const [payload, signature, extra] = token.split('.');
   if (!payload || !signature || extra) return false;
   try {
     if (!safeEqual(signature, sign(payload))) return false;
     const session = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { email?: unknown; exp?: unknown };
-    return typeof session.email === 'string' && session.email.toLowerCase() === process.env.ADMIN_EMAIL?.toLowerCase()
-      && typeof session.exp === 'number' && session.exp > Math.floor(Date.now() / 1000);
+    if (typeof session.email !== 'string' || typeof session.exp !== 'number' || session.exp <= Math.floor(Date.now() / 1000)) return false;
+    const email = session.email.trim().toLowerCase();
+    if (email === process.env.ADMIN_EMAIL?.trim().toLowerCase() && Boolean(process.env.ADMIN_PASSWORD)) return true;
+    const { isActiveAdmin } = await import('./backend-db');
+    return isActiveAdmin(email);
   } catch {
     return false;
   }
@@ -77,11 +82,31 @@ export function isSameOriginRequest(request: Request): boolean {
   }
 }
 
-export function verifyPassword(candidate: string): boolean {
-  const email = process.env.ADMIN_EMAIL;
-  const password = process.env.ADMIN_PASSWORD;
-  if (!email || !password || !process.env.ADMIN_SESSION_SECRET) return false;
-  return safeEqual(candidate, password);
+export async function verifyPassword(email: string, candidate: string): Promise<boolean> {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!process.env.ADMIN_SESSION_SECRET || !candidate) return false;
+  if (normalizedEmail === process.env.ADMIN_EMAIL?.trim().toLowerCase() && process.env.ADMIN_PASSWORD) {
+    return safeEqual(candidate, process.env.ADMIN_PASSWORD);
+  }
+  const { getActiveAdminPasswordHash } = await import('./backend-db');
+  const encoded = await getActiveAdminPasswordHash(normalizedEmail);
+  if (!encoded) return false;
+  const [salt, expected] = encoded.split(':');
+  if (!salt || !expected) return false;
+  const actual = await scrypt(candidate, salt, 64) as Buffer;
+  return safeEqual(actual.toString('base64url'), expected);
+}
+
+export async function hashAdminPassword(password: string): Promise<string> {
+  const salt = randomBytes(16).toString('base64url');
+  const hash = await scrypt(password, salt, 64) as Buffer;
+  return `${salt}:${hash.toString('base64url')}`;
+}
+
+export async function isConfiguredAdmin(email: string): Promise<boolean> {
+  if (email.trim().toLowerCase() === process.env.ADMIN_EMAIL?.trim().toLowerCase()) return Boolean(process.env.ADMIN_PASSWORD);
+  const { isActiveAdmin } = await import('./backend-db');
+  return isActiveAdmin(email.trim().toLowerCase());
 }
 
 export async function checkLoginThrottle(identityHash: string): Promise<boolean> {

@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { recordAuthorizeNetEvent } from '../../../../lib/backend-db';
+import { getPendingDonationAlerts, markDonationAlert, recordAuthorizeNetEvent } from '../../../../lib/backend-db';
+import { alertEmailAddress, escapeHtml, sendEmail } from '../../../../lib/email';
 
 export const runtime = 'nodejs';
 
@@ -58,6 +59,24 @@ export async function POST(request: Request) {
     });
     if (result === 'amount_mismatch') console.error('Authorize.Net webhook amount did not match donation record.', event.notificationId, reference);
     if (result === 'unknown') console.warn('Authorize.Net webhook referenced an unknown donation.', event.notificationId, reference);
+    for (const donation of await getPendingDonationAlerts()) {
+      try {
+        const amount = Number(donation.amount).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+        const occurredAt = new Date(donation.createdAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' });
+        await sendEmail({
+          to: alertEmailAddress(),
+          subject: `Donation confirmed: ${amount}`,
+          text: `Authorize.Net confirmed a donation of ${amount}.\nReference: ${donation.reference}\nTransaction: ${donation.transactionId ?? 'Not provided'}\nCheckout created: ${occurredAt} UTC`,
+          html: `<h2>Donation confirmed</h2><p><strong>Amount:</strong> ${escapeHtml(amount)}</p><p><strong>Reference:</strong> ${escapeHtml(donation.reference)}</p><p><strong>Transaction:</strong> ${escapeHtml(donation.transactionId ?? 'Not provided')}</p><p><strong>Checkout created:</strong> ${escapeHtml(occurredAt)} UTC</p>`,
+          idempotencyKey: `fha-donation-${donation.reference}`,
+        });
+        await markDonationAlert(donation.reference);
+      } catch (error) {
+        await markDonationAlert(donation.reference, error instanceof Error ? error.message : 'Email delivery failed');
+        console.error('Donation was confirmed but its staff email alert is pending:', error);
+        return Response.json({ error: 'Donation recorded; notification delivery will be retried.' }, { status: 503 });
+      }
+    }
     return Response.json({ received: true, result });
   } catch (error) {
     console.error('Could not process Authorize.Net webhook:', error);
