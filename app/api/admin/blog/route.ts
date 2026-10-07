@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { cookies } from 'next/headers';
-import { ensureDatabase, getPool } from '../../../../lib/backend-db';
-import { getAdminCookieName, isSameOriginRequest, verifyAdminSession } from '../../../../lib/admin-auth';
+import { ensureDatabase, getPool, recordAdminActivity } from '../../../../lib/backend-db';
+import { adminEmailFromSession, getAdminCookieName, isSameOriginRequest, verifyAdminSession } from '../../../../lib/admin-auth';
 import { saveBlogImage } from '../../../../lib/r2-storage';
 
 export const runtime = 'nodejs';
@@ -28,7 +28,8 @@ export async function POST(request: Request) {
   const excerpt = String(form.get('excerpt') ?? '').trim();
   const body = String(form.get('body') ?? '').trim();
   const programSlug = slugify(String(form.get('programSlug') ?? 'education-scholarship-fund')) || 'education-scholarship-fund';
-  const status = form.get('status') === 'published' ? 'published' : 'draft';
+  const status = ['published', 'scheduled', 'archived'].includes(String(form.get('status'))) ? String(form.get('status')) : 'draft';
+  const scheduledAt = status === 'scheduled' ? new Date(String(form.get('scheduledAt') ?? '')) : null;
   const image = form.get('image');
   if (title.length < 4 || title.length > 180 || !tag || tag.length > 80 || !body || body.length > 25_000) {
     return Response.json({ error: 'Add a title (4–180 characters), category, and story (up to 25,000 characters).' }, { status: 400 });
@@ -36,6 +37,7 @@ export async function POST(request: Request) {
   if (!(image instanceof File) || image.size < 1) return Response.json({ error: 'Choose a cover image to upload.' }, { status: 400 });
   const slug = slugify(String(form.get('slug') ?? title));
   if (!slug) return Response.json({ error: 'Enter a title that can form a URL slug.' }, { status: 400 });
+  if (status === 'scheduled' && (!scheduledAt || !Number.isFinite(scheduledAt.getTime()) || scheduledAt <= new Date())) return Response.json({ error: 'Choose a future date and time for the scheduled post.' }, { status: 400 });
 
   try { await ensureDatabase(); }
   catch (error) {
@@ -49,11 +51,14 @@ export async function POST(request: Request) {
   catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'Image upload failed.' }, { status: 400 }); }
 
   try {
+    const id = randomUUID();
     await getPool().query(
       `INSERT INTO blog_posts (id, slug, title, tag, excerpt, image_url, program_slug, body, status, published_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CASE WHEN $9 = 'published' THEN NOW() ELSE NULL END)`,
-      [randomUUID(), slug, title, tag, excerpt.slice(0, 300), uploaded.url, programSlug, body, status],
+      [id, slug, title, tag, excerpt.slice(0, 300), uploaded.url, programSlug, body, status],
     );
+    if (status === 'scheduled') await getPool().query('UPDATE blog_posts SET scheduled_at = $2 WHERE id = $1', [id, scheduledAt]);
+    await recordAdminActivity(adminEmailFromSession((await cookies()).get(getAdminCookieName())?.value), 'created', 'blog_post', id, `${status === 'scheduled' ? 'Scheduled' : status === 'published' ? 'Published' : 'Saved draft'}: ${title}`).catch((error) => console.error('Could not record blog activity:', error));
     return Response.json({ ok: true, slug }, { status: 201, headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     console.error('Could not save blog post:', error);

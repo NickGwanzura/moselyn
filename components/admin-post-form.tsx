@@ -44,7 +44,8 @@ export function AdminPostForm({ post }: { post?: StoredBlogPost }) {
       <label className="admin-wide">Story<textarea name="body" defaultValue={post?.paragraphs.join('\n\n')} rows={12} maxLength={25000} required placeholder="Write the story. Separate paragraphs with a blank line." /></label>
       <label className="admin-wide">Cover image {post && <span className="admin-muted">(leave blank to keep the current image)</span>}<input name="image" type="file" accept="image/jpeg,image/png,image/webp,image/avif" required={!post} /></label>
       {post?.image && <div className="admin-image-preview"><img src={post.image} alt="Current cover image"/><span>Current cover image</span></div>}
-      <label>Publishing status<select name="status" defaultValue={post?.status ?? 'draft'}><option value="draft">Save as draft</option><option value="published">Publish now</option></select></label>
+      <label>Publishing status<select name="status" defaultValue={post?.status ?? 'draft'}><option value="draft">Save as draft</option><option value="published">Publish now</option><option value="scheduled">Schedule</option><option value="archived">Archive</option></select></label>
+      <label>Schedule for publication<input name="scheduledAt" type="datetime-local" defaultValue={post?.scheduledAt ? new Date(new Date(post.scheduledAt).getTime() - new Date(post.scheduledAt).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''}/><span className="admin-muted">Choose a future date and select “Schedule” above.</span></label>
     </div>
     <p className="admin-upload-note">Images are stored in the FHA Cloudflare R2 bucket. Maximum 8 MB; JPEG, PNG, WebP, or AVIF.</p>
     {error && <p className="admin-error" role="alert">{error}</p>}

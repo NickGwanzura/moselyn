@@ -1,5 +1,5 @@
 import { createHmac, randomUUID } from 'node:crypto';
-import { alertEmailAddress, escapeHtml, sendEmail } from '../../../lib/email';
+import { alertEmailAddress, brandedEmailHtml, escapeHtml, sendEmail } from '../../../lib/email';
 import { checkContactRateLimit, createContactEnquiry, markContactAlert } from '../../../lib/backend-db';
 import { isSameOriginRequest } from '../../../lib/admin-auth';
 
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
         replyTo: email,
         subject: `New website enquiry: ${subject}`,
         text: `From: ${name} <${email}>\nSubject: ${subject}\n\n${message}`,
-        html: `<h2>New website enquiry</h2><p><strong>From:</strong> ${escapeHtml(name)} &lt;${escapeHtml(email)}&gt;</p><p><strong>Subject:</strong> ${escapeHtml(subject)}</p><div style="white-space:pre-wrap">${escapeHtml(message)}</div>`,
+        html: brandedEmailHtml({ title: 'New website enquiry', preheader: `New message from ${name}.`, content: `<p style="margin:0 0 8px"><strong>From:</strong> ${escapeHtml(name)} &lt;${escapeHtml(email)}&gt;</p><p style="margin:0 0 18px"><strong>Subject:</strong> ${escapeHtml(subject)}</p><div style="white-space:pre-wrap;padding:18px;background:#f7f5f0;border-left:3px solid #dfaa62">${escapeHtml(message)}</div>`, action: { label: 'Reply to enquiry', url: `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(`Re: ${subject}`)}` } }),
         idempotencyKey: `fha-enquiry-${id}`,
       });
       await markContactAlert(id);

@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { ArrowLeft, ArrowUpRight } from 'lucide-react';
 import Link from '../../../components/site-link';
 import { notFound } from 'next/navigation';
-import { getBlogPostBySlug } from '../../../lib/backend-db';
+import { getBlogPostBySlug, recordBlogPostView } from '../../../lib/backend-db';
 import { createPageMetadata } from '../../../lib/seo';
 
 type PageProps = { params: Promise<{ slug: string }> };
@@ -28,6 +28,11 @@ export default async function BlogStoryPage({ params }: PageProps) {
   const { slug } = await params;
   const story = await getBlogPostBySlug(slug);
   if (!story) notFound();
+  try {
+    await recordBlogPostView(story.id);
+  } catch (error) {
+    console.error('Could not record blog page view:', error);
+  }
 
   return <main>
     <section className="blog-story-hero" style={{ backgroundImage: `linear-gradient(90deg,rgba(36,26,20,.86),rgba(36,26,20,.18)),url(${story.image})` }}>

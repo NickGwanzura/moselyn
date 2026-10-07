@@ -2,10 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { Pool, type PoolClient } from 'pg';
 import { blogStories, type BlogStory } from './blog-stories';
 
-export type StoredBlogPost = BlogStory & {
+export type StoredBlogPost = Omit<BlogStory, 'status' | 'publishedAt'> & {
   id: string;
   excerpt: string;
-  status: 'draft' | 'published';
+  status: 'draft' | 'scheduled' | 'published' | 'archived';
+  scheduledAt: string | null;
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -23,7 +24,13 @@ export type DonationRecord = {
 };
 
 export type AdminInvite = { email: string; expiresAt: string; createdAt: string };
-export type ContactEnquiry = { id: string; name: string; email: string; subject: string; message: string; createdAt: string; alertSentAt: string | null };
+export type ContactEnquiry = { id: string; name: string; email: string; subject: string; message: string; createdAt: string; alertSentAt: string | null; status: 'new' | 'in_progress' | 'resolved'; assignedTo: string | null };
+export type BlogAnalytics = {
+  totalViews: number;
+  last30DaysViews: number;
+  dailyViews: Array<{ date: string; views: number }>;
+  topPosts: Array<{ id: string; title: string; slug: string; views: number; last30DaysViews: number }>;
+};
 
 type DbRow = Record<string, unknown>;
 const globalForPool = globalThis as typeof globalThis & { fhaPool?: Pool; fhaSchemaReady?: Promise<void> };
@@ -64,6 +71,16 @@ export async function ensureDatabase(): Promise<void> {
         published_at TIMESTAMPTZ
       );
       CREATE INDEX IF NOT EXISTS blog_posts_publication_idx ON blog_posts (status, published_at DESC);
+      ALTER TABLE blog_posts DROP CONSTRAINT IF EXISTS blog_posts_status_check;
+      ALTER TABLE blog_posts ADD CONSTRAINT blog_posts_status_check CHECK (status IN ('draft', 'scheduled', 'published', 'archived'));
+      ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ;
+      CREATE TABLE IF NOT EXISTS blog_post_daily_views (
+        post_id TEXT NOT NULL REFERENCES blog_posts(id) ON DELETE CASCADE,
+        view_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        views INTEGER NOT NULL DEFAULT 0 CHECK (views >= 0),
+        PRIMARY KEY (post_id, view_date)
+      );
+      CREATE INDEX IF NOT EXISTS blog_post_daily_views_date_idx ON blog_post_daily_views (view_date DESC);
       CREATE TABLE IF NOT EXISTS donations (
         id TEXT PRIMARY KEY,
         reference VARCHAR(20) NOT NULL UNIQUE,
@@ -80,6 +97,15 @@ export async function ensureDatabase(): Promise<void> {
         event_id VARCHAR(120) PRIMARY KEY,
         event_type VARCHAR(120) NOT NULL,
         received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS authorize_net_settings (
+        id SMALLINT PRIMARY KEY CHECK (id = 1),
+        api_login_id_ciphertext TEXT NOT NULL,
+        transaction_key_ciphertext TEXT NOT NULL,
+        signature_key_ciphertext TEXT,
+        mode VARCHAR(16) NOT NULL DEFAULT 'sandbox' CHECK (mode IN ('sandbox', 'production')),
+        updated_by VARCHAR(254) NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       CREATE TABLE IF NOT EXISTS admin_login_attempts (
         identity_hash CHAR(64) PRIMARY KEY,
@@ -111,8 +137,23 @@ export async function ensureDatabase(): Promise<void> {
         ip_hash CHAR(64) NOT NULL,
         alert_sent_at TIMESTAMPTZ,
         alert_error TEXT,
+        status VARCHAR(20) NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'in_progress', 'resolved')),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+      ALTER TABLE contact_enquiries ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'new';
+      ALTER TABLE contact_enquiries ADD COLUMN IF NOT EXISTS assigned_to VARCHAR(254);
+      ALTER TABLE contact_enquiries DROP CONSTRAINT IF EXISTS contact_enquiries_status_check;
+      ALTER TABLE contact_enquiries ADD CONSTRAINT contact_enquiries_status_check CHECK (status IN ('new', 'in_progress', 'resolved'));
+      CREATE TABLE IF NOT EXISTS admin_activity (
+        id BIGSERIAL PRIMARY KEY,
+        actor VARCHAR(254) NOT NULL,
+        action VARCHAR(80) NOT NULL,
+        item_type VARCHAR(40) NOT NULL,
+        item_id TEXT NOT NULL,
+        summary VARCHAR(300) NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS admin_activity_created_idx ON admin_activity (created_at DESC);
       CREATE INDEX IF NOT EXISTS contact_enquiries_created_idx ON contact_enquiries (created_at DESC);
       CREATE TABLE IF NOT EXISTS contact_rate_limits (
         ip_hash CHAR(64) PRIMARY KEY,
@@ -153,14 +194,21 @@ function toBlogPost(row: DbRow): StoredBlogPost {
     programSlug: String(row.program_slug),
     paragraphs: body.split(/\n\s*\n/).map((paragraph) => paragraph.trim()).filter(Boolean),
     excerpt: String(row.excerpt ?? ''),
-    status: row.status === 'published' ? 'published' : 'draft',
+    status: ['draft', 'scheduled', 'published', 'archived'].includes(String(row.status)) ? row.status as StoredBlogPost['status'] : 'draft',
+    scheduledAt: row.scheduled_at ? new Date(String(row.scheduled_at)).toISOString() : null,
     publishedAt: row.published_at ? new Date(String(row.published_at)).toISOString() : null,
     createdAt: new Date(String(row.created_at)).toISOString(),
     updatedAt: new Date(String(row.updated_at)).toISOString(),
   };
 }
 
-const BLOG_COLUMNS = 'id, slug, title, tag, excerpt, image_url, program_slug, body, status, published_at, created_at, updated_at';
+const BLOG_COLUMNS = 'id, slug, title, tag, excerpt, image_url, program_slug, body, status, scheduled_at, published_at, created_at, updated_at';
+
+async function publishDuePosts(): Promise<void> {
+  if (!hasDatabase()) return;
+  await ensureDatabase();
+  await getPool().query("UPDATE blog_posts SET status = 'published', published_at = scheduled_at, updated_at = NOW() WHERE status = 'scheduled' AND scheduled_at <= NOW()");
+}
 
 export async function getPublishedBlogPosts(): Promise<StoredBlogPost[]> {
   if (!hasDatabase()) return blogStories.map((post, index) => ({
@@ -168,11 +216,12 @@ export async function getPublishedBlogPosts(): Promise<StoredBlogPost[]> {
     id: `seed-${index}`,
     excerpt: post.paragraphs[0] ?? '',
     status: 'published',
+    scheduledAt: null,
     publishedAt: null,
     createdAt: '',
     updatedAt: '',
   }));
-  await ensureDatabase();
+  await publishDuePosts();
   const result = await getPool().query(`SELECT ${BLOG_COLUMNS} FROM blog_posts WHERE status = 'published' ORDER BY published_at DESC NULLS LAST, created_at DESC`);
   return result.rows.map(toBlogPost);
 }
@@ -180,9 +229,9 @@ export async function getPublishedBlogPosts(): Promise<StoredBlogPost[]> {
 export async function getBlogPostBySlug(slug: string): Promise<StoredBlogPost | null> {
   if (!hasDatabase()) {
     const post = blogStories.find((story) => story.slug === slug);
-    return post ? { ...post, id: `seed-${slug}`, excerpt: post.paragraphs[0] ?? '', status: 'published', publishedAt: null, createdAt: '', updatedAt: '' } : null;
+    return post ? { ...post, id: `seed-${slug}`, excerpt: post.paragraphs[0] ?? '', status: 'published', scheduledAt: null, publishedAt: null, createdAt: '', updatedAt: '' } : null;
   }
-  await ensureDatabase();
+  await publishDuePosts();
   const result = await getPool().query(`SELECT ${BLOG_COLUMNS} FROM blog_posts WHERE slug = $1 AND status = 'published' LIMIT 1`, [slug]);
   return result.rows[0] ? toBlogPost(result.rows[0]) : null;
 }
@@ -191,6 +240,60 @@ export async function getAdminBlogPosts(): Promise<StoredBlogPost[]> {
   await ensureDatabase();
   const result = await getPool().query(`SELECT ${BLOG_COLUMNS} FROM blog_posts ORDER BY updated_at DESC`);
   return result.rows.map(toBlogPost);
+}
+
+export async function recordBlogPostView(postId: string): Promise<void> {
+  if (!hasDatabase()) return;
+  await ensureDatabase();
+  await getPool().query(
+    `INSERT INTO blog_post_daily_views (post_id, view_date, views)
+     SELECT id, CURRENT_DATE, 1 FROM blog_posts WHERE id = $1 AND status = 'published'
+     ON CONFLICT (post_id, view_date) DO UPDATE SET views = blog_post_daily_views.views + 1`,
+    [postId],
+  );
+}
+
+export async function getBlogAnalytics(): Promise<BlogAnalytics> {
+  await ensureDatabase();
+  const pool = getPool();
+  const [summary, daily, posts] = await Promise.all([
+    pool.query<{ total_views: string; last_30_days_views: string }>(
+      `SELECT COALESCE(SUM(v.views), 0)::text AS total_views,
+        COALESCE(SUM(v.views) FILTER (WHERE v.view_date >= CURRENT_DATE - 29), 0)::text AS last_30_days_views
+       FROM blog_post_daily_views v
+       JOIN blog_posts p ON p.id = v.post_id AND p.status = 'published'`,
+    ),
+    pool.query<{ date: string; views: string }>(
+      `SELECT g.day::date::text AS date,
+        COALESCE(SUM(v.views) FILTER (WHERE p.status = 'published'), 0)::text AS views
+       FROM generate_series(CURRENT_DATE - 6, CURRENT_DATE, INTERVAL '1 day') AS g(day)
+       LEFT JOIN blog_post_daily_views v ON v.view_date = g.day::date
+       LEFT JOIN blog_posts p ON p.id = v.post_id
+       GROUP BY g.day ORDER BY g.day`,
+    ),
+    pool.query<{ id: string; title: string; slug: string; views: string; last_30_days_views: string }>(
+      `SELECT p.id, p.title, p.slug,
+        COALESCE(SUM(v.views), 0)::text AS views,
+        COALESCE(SUM(v.views) FILTER (WHERE v.view_date >= CURRENT_DATE - 29), 0)::text AS last_30_days_views
+       FROM blog_posts p
+       LEFT JOIN blog_post_daily_views v ON v.post_id = p.id
+       WHERE p.status = 'published'
+       GROUP BY p.id
+       ORDER BY SUM(v.views) FILTER (WHERE v.view_date >= CURRENT_DATE - 29) DESC NULLS LAST, SUM(v.views) DESC NULLS LAST, p.published_at DESC NULLS LAST`,
+    ),
+  ]);
+  return {
+    totalViews: Number(summary.rows[0]?.total_views ?? 0),
+    last30DaysViews: Number(summary.rows[0]?.last_30_days_views ?? 0),
+    dailyViews: daily.rows.map((row) => ({ date: row.date, views: Number(row.views) })),
+    topPosts: posts.rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      slug: row.slug,
+      views: Number(row.views),
+      last30DaysViews: Number(row.last_30_days_views),
+    })),
+  };
 }
 
 export async function getAdminBlogPost(id: string): Promise<StoredBlogPost | null> {
@@ -276,7 +379,7 @@ export async function checkContactRateLimit(ipHash: string): Promise<boolean> {
   return Number(result.rows[0]?.submission_count ?? 99) <= 5;
 }
 
-export async function createContactEnquiry(input: Omit<ContactEnquiry, 'createdAt' | 'alertSentAt'> & { ipHash: string }): Promise<void> {
+export async function createContactEnquiry(input: Omit<ContactEnquiry, 'createdAt' | 'alertSentAt' | 'status' | 'assignedTo'> & { ipHash: string }): Promise<void> {
   await ensureDatabase();
   await getPool().query('INSERT INTO contact_enquiries (id, name, email, subject, message, ip_hash) VALUES ($1, $2, $3, $4, $5, $6)', [input.id, input.name, input.email, input.subject, input.message, input.ipHash]);
 }
@@ -288,14 +391,46 @@ export async function markContactAlert(id: string, error?: string): Promise<void
 
 export async function getRecentContactEnquiries(): Promise<ContactEnquiry[]> {
   await ensureDatabase();
-  const result = await getPool().query('SELECT id, name, email, subject, message, created_at, alert_sent_at FROM contact_enquiries ORDER BY created_at DESC LIMIT 100');
-  return result.rows.map((row: DbRow) => ({ id: String(row.id), name: String(row.name), email: String(row.email), subject: String(row.subject), message: String(row.message), createdAt: new Date(String(row.created_at)).toISOString(), alertSentAt: row.alert_sent_at ? new Date(String(row.alert_sent_at)).toISOString() : null }));
+  const result = await getPool().query('SELECT id, name, email, subject, message, created_at, alert_sent_at, status, assigned_to FROM contact_enquiries ORDER BY created_at DESC LIMIT 100');
+  return result.rows.map((row: DbRow) => ({ id: String(row.id), name: String(row.name), email: String(row.email), subject: String(row.subject), message: String(row.message), createdAt: new Date(String(row.created_at)).toISOString(), alertSentAt: row.alert_sent_at ? new Date(String(row.alert_sent_at)).toISOString() : null, status: ['new', 'in_progress', 'resolved'].includes(String(row.status)) ? row.status as ContactEnquiry['status'] : 'new', assignedTo: row.assigned_to ? String(row.assigned_to) : null }));
 }
 
-export async function getPendingDonationAlerts(): Promise<Array<{ reference: string; amount: string; transactionId: string | null; createdAt: string }>> {
+export async function setContactEnquiryStatus(id: string, status: ContactEnquiry['status']): Promise<boolean> {
   await ensureDatabase();
-  const result = await getPool().query("SELECT reference, amount::text, transaction_id, created_at FROM donations WHERE status = 'completed' AND alert_sent_at IS NULL ORDER BY created_at ASC LIMIT 25");
-  return result.rows.map((row: DbRow) => ({ reference: String(row.reference), amount: String(row.amount), transactionId: row.transaction_id ? String(row.transaction_id) : null, createdAt: new Date(String(row.created_at)).toISOString() }));
+  const result = await getPool().query('UPDATE contact_enquiries SET status = $2 WHERE id = $1', [id, status]);
+  return Boolean(result.rowCount);
+}
+
+export async function assignContactEnquiry(id: string, email: string | null): Promise<boolean> {
+  await ensureDatabase();
+  const result = await getPool().query('UPDATE contact_enquiries SET assigned_to = $2 WHERE id = $1', [id, email]);
+  return Boolean(result.rowCount);
+}
+
+export async function listAdminEmails(): Promise<string[]> {
+  await ensureDatabase();
+  const result = await getPool().query('SELECT email FROM admin_users WHERE active = TRUE ORDER BY email');
+  const emails = result.rows.map((row: DbRow) => String(row.email));
+  const configured = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  if (configured && !emails.includes(configured)) emails.unshift(configured);
+  return emails;
+}
+
+export async function recordAdminActivity(actor: string, action: string, itemType: string, itemId: string, summary: string): Promise<void> {
+  await ensureDatabase();
+  await getPool().query('INSERT INTO admin_activity (actor, action, item_type, item_id, summary) VALUES ($1, $2, $3, $4, $5)', [actor.slice(0, 254), action.slice(0, 80), itemType.slice(0, 40), itemId, summary.slice(0, 300)]);
+}
+
+export async function getRecentAdminActivity(): Promise<Array<{ actor: string; action: string; itemType: string; itemId: string; summary: string; createdAt: string }>> {
+  await ensureDatabase();
+  const result = await getPool().query('SELECT actor, action, item_type, item_id, summary, created_at FROM admin_activity ORDER BY created_at DESC LIMIT 25');
+  return result.rows.map((row: DbRow) => ({ actor: String(row.actor), action: String(row.action), itemType: String(row.item_type), itemId: String(row.item_id), summary: String(row.summary), createdAt: new Date(String(row.created_at)).toISOString() }));
+}
+
+export async function getPendingDonationAlerts(): Promise<Array<{ reference: string; amount: string; transactionId: string | null; createdAt: string; status: DonationRecord['status'] }>> {
+  await ensureDatabase();
+  const result = await getPool().query("SELECT reference, amount::text, transaction_id, created_at, status FROM donations WHERE status IN ('completed', 'declined', 'failed', 'held') AND alert_sent_at IS NULL ORDER BY created_at ASC LIMIT 25");
+  return result.rows.map((row: DbRow) => ({ reference: String(row.reference), amount: String(row.amount), transactionId: row.transaction_id ? String(row.transaction_id) : null, createdAt: new Date(String(row.created_at)).toISOString(), status: String(row.status) as DonationRecord['status'] }));
 }
 
 export async function markDonationAlert(reference: string, error?: string): Promise<void> {
@@ -303,19 +438,23 @@ export async function markDonationAlert(reference: string, error?: string): Prom
   await getPool().query('UPDATE donations SET alert_sent_at = CASE WHEN $2::text IS NULL THEN NOW() ELSE alert_sent_at END, alert_error = $2 WHERE reference = $1', [reference, error?.slice(0, 500) ?? null]);
 }
 
-export async function getDonationDashboard(): Promise<{ totalCompleted: string; completedCount: number; pendingCount: number; recent: DonationRecord[] }> {
+export async function getDonationDashboard(): Promise<{ totalCompleted: string; completedLast30Days: string; completedCount: number; pendingCount: number; attentionCount: number; recent: DonationRecord[] }> {
   await ensureDatabase();
   const pool = getPool();
   const [summary, records] = await Promise.all([
-    pool.query<{ total: string; completed: string; pending: string }>(`SELECT COALESCE(SUM(amount) FILTER (WHERE status = 'completed'), 0)::text AS total,
+    pool.query<{ total: string; recent_total: string; completed: string; pending: string; attention: string }>(`SELECT COALESCE(SUM(amount) FILTER (WHERE status = 'completed'), 0)::text AS total,
+      COALESCE(SUM(amount) FILTER (WHERE status = 'completed' AND created_at >= NOW() - INTERVAL '30 days'), 0)::text AS recent_total,
       COUNT(*) FILTER (WHERE status = 'completed')::text AS completed,
-      COUNT(*) FILTER (WHERE status = 'pending')::text AS pending FROM donations`),
+      COUNT(*) FILTER (WHERE status = 'pending')::text AS pending,
+      COUNT(*) FILTER (WHERE status IN ('declined', 'failed', 'held'))::text AS attention FROM donations`),
     pool.query(`SELECT id, reference, amount::text, currency, status, transaction_id, created_at, updated_at FROM donations ORDER BY created_at DESC LIMIT 100`),
   ]);
   return {
     totalCompleted: summary.rows[0]?.total ?? '0',
+    completedLast30Days: summary.rows[0]?.recent_total ?? '0',
     completedCount: Number(summary.rows[0]?.completed ?? 0),
     pendingCount: Number(summary.rows[0]?.pending ?? 0),
+    attentionCount: Number(summary.rows[0]?.attention ?? 0),
     recent: records.rows.map((row: DbRow) => ({
       id: String(row.id), reference: String(row.reference), amount: String(row.amount), currency: String(row.currency),
       status: String(row.status) as DonationRecord['status'], transactionId: row.transaction_id ? String(row.transaction_id) : null,
@@ -360,8 +499,8 @@ export async function recordAuthorizeNetEvent(input: {
       : isCapture && input.responseCode === '3' ? 'failed' : null;
     if (eventStatus) {
       await client.query(`UPDATE donations SET status = $2, transaction_id = COALESCE(transaction_id, $3), gateway_response_code = $4,
-        alert_sent_at = CASE WHEN $2 = 'completed' AND status <> 'completed' THEN NULL ELSE alert_sent_at END,
-        alert_error = CASE WHEN $2 = 'completed' AND status <> 'completed' THEN NULL ELSE alert_error END,
+        alert_sent_at = CASE WHEN $2 <> status THEN NULL ELSE alert_sent_at END,
+        alert_error = CASE WHEN $2 <> status THEN NULL ELSE alert_error END,
         updated_at = NOW() WHERE reference = $1`, [input.reference, eventStatus, input.transactionId, input.responseCode]);
     }
     await client.query('COMMIT');

@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
-import { ensureDatabase, getPool } from '../../../../../lib/backend-db';
-import { getAdminCookieName, isSameOriginRequest, verifyAdminSession } from '../../../../../lib/admin-auth';
+import { ensureDatabase, getPool, recordAdminActivity } from '../../../../../lib/backend-db';
+import { adminEmailFromSession, getAdminCookieName, isSameOriginRequest, verifyAdminSession } from '../../../../../lib/admin-auth';
 import { deleteBlogImage, saveBlogImage } from '../../../../../lib/r2-storage';
 
 export const runtime = 'nodejs';
@@ -25,11 +25,13 @@ export async function PATCH(request: Request, context: RouteContext) {
   const body = String(form.get('body') ?? '').trim();
   const slug = String(form.get('slug') ?? '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '').slice(0, 110);
   const programSlug = String(form.get('programSlug') ?? 'education-scholarship-fund').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-');
-  const status = form.get('status') === 'published' ? 'published' : 'draft';
+  const status = ['published', 'scheduled', 'archived'].includes(String(form.get('status'))) ? String(form.get('status')) : 'draft';
+  const scheduledAt = status === 'scheduled' ? new Date(String(form.get('scheduledAt') ?? '')) : null;
   const image = form.get('image');
   if (title.length < 4 || title.length > 180 || !tag || tag.length > 80 || !body || body.length > 25_000 || !slug) {
     return Response.json({ error: 'Check title, category, URL slug, and story text.' }, { status: 400 });
   }
+  if (status === 'scheduled' && (!scheduledAt || !Number.isFinite(scheduledAt.getTime()) || scheduledAt <= new Date())) return Response.json({ error: 'Choose a future date and time for the scheduled post.' }, { status: 400 });
   await ensureDatabase();
   const pool = getPool();
   const previous = await pool.query<{ image_url: string }>('SELECT image_url FROM blog_posts WHERE id = $1', [id]);
@@ -42,11 +44,12 @@ export async function PATCH(request: Request, context: RouteContext) {
   try {
     const result = await pool.query(
       `UPDATE blog_posts SET slug = $2, title = $3, tag = $4, excerpt = $5, image_url = $6, program_slug = $7, body = $8,
-        status = $9, published_at = CASE WHEN $9 = 'published' THEN COALESCE(published_at, NOW()) ELSE NULL END, updated_at = NOW()
+        status = $9, scheduled_at = $10, published_at = CASE WHEN $9 = 'published' THEN COALESCE(published_at, NOW()) ELSE NULL END, updated_at = NOW()
        WHERE id = $1 RETURNING id`,
-      [id, slug, title, tag, excerpt.slice(0, 300), imageUrl, programSlug, body, status],
+      [id, slug, title, tag, excerpt.slice(0, 300), imageUrl, programSlug, body, status, status === 'scheduled' ? scheduledAt : null],
     );
     if (!result.rowCount) return Response.json({ error: 'Post not found.' }, { status: 404 });
+    await recordAdminActivity(adminEmailFromSession((await cookies()).get(getAdminCookieName())?.value), 'updated', 'blog_post', id, `${status === 'scheduled' ? 'Scheduled' : status === 'published' ? 'Published' : 'Saved draft'}: ${title}`).catch((error) => console.error('Could not record blog activity:', error));
     if (imageUrl !== previous.rows[0].image_url) void deleteBlogImage(previous.rows[0].image_url).catch((error) => console.error('Could not remove old blog image:', error));
     return Response.json({ ok: true, slug }, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
@@ -63,5 +66,6 @@ export async function DELETE(request: Request, context: RouteContext) {
   const result = await getPool().query<{ image_url: string }>('DELETE FROM blog_posts WHERE id = $1 RETURNING image_url', [id]);
   if (!result.rowCount) return Response.json({ error: 'Post not found.' }, { status: 404 });
   await deleteBlogImage(result.rows[0].image_url).catch((error) => console.error('Could not remove blog image:', error));
+  await recordAdminActivity(adminEmailFromSession((await cookies()).get(getAdminCookieName())?.value), 'deleted', 'blog_post', id, `Deleted blog story ${id}`);
   return Response.json({ ok: true });
 }

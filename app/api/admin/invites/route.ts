@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { cookies } from 'next/headers';
-import { escapeHtml, publicSiteUrl, sendEmail } from '../../../../lib/email';
+import { brandedEmailHtml, publicSiteUrl, sendEmail } from '../../../../lib/email';
 import { createAdminInvite, getActiveAdminPasswordHash, revokeAdminInvite } from '../../../../lib/backend-db';
 import { getAdminCookieName, isConfiguredAdmin, isSameOriginRequest, verifyAdminSession } from '../../../../lib/admin-auth';
 
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
       to: email,
       subject: 'You are invited to Finding Hope Africa admin',
       text: `You have been invited to manage the Finding Hope Africa website. Accept your invitation within 48 hours: ${inviteUrl}`,
-      html: `<p>You have been invited to manage the Finding Hope Africa website.</p><p><a href="${escapeHtml(inviteUrl)}">Accept your administrator invitation</a></p><p>This link expires in 48 hours. If you were not expecting it, you can ignore this email.</p>`,
+      html: brandedEmailHtml({ title: 'You’re invited', preheader: 'Join the Finding Hope Africa website team.', content: '<p>You have been invited to help manage the Finding Hope Africa website.</p><p>This invitation is personal and can only be used once. It expires in 48 hours.</p><p style="font-size:13px;color:#747b75">If you were not expecting this invitation, you can safely ignore this email.</p>', action: { label: 'Accept invitation', url: inviteUrl } }),
       idempotencyKey: `admin-invite-${tokenHash}`,
     });
   } catch (error) {

@@ -30,7 +30,7 @@ export function CookieNotice() {
   return <aside className="cookie-notice" role="region" aria-label="Cookie notice">
     <div className="cookie-notice-copy">
       <p className="eyebrow">A note about cookies</p>
-      <p>This site does not currently use analytics or advertising cookies. We use browser storage only to remember that you dismissed this notice. Authorize.Net may use its own technologies if you continue to donation checkout.</p>
+      <p>We count approximate blog page views as daily totals on our server, without visitor IDs or analytics cookies. Browser storage remembers when you dismiss this notice. Authorize.Net may use its own technologies if you continue to donation checkout.</p>
       <Link href="/cookies">Read our Cookie Policy</Link>
     </div>
     <button className="button button-dark cookie-notice-dismiss" type="button" onClick={dismiss}>Understood</button>

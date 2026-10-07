@@ -1,11 +1,11 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { getPendingDonationAlerts, markDonationAlert, recordAuthorizeNetEvent } from '../../../../lib/backend-db';
-import { alertEmailAddress, escapeHtml, sendEmail } from '../../../../lib/email';
+import { alertEmailAddress, brandedEmailHtml, escapeHtml, sendEmail } from '../../../../lib/email';
+import { getAuthorizeNetConfig } from '../../../../lib/payment-settings';
 
 export const runtime = 'nodejs';
 
-function validSignature(rawBody: string, header: string | null): boolean {
-  const signatureKey = process.env.AUTHORIZE_NET_SIGNATURE_KEY;
+function validSignature(rawBody: string, header: string | null, signatureKey: string): boolean {
   if (!signatureKey || !header) return false;
   const match = /^sha512=([0-9a-f]{128})$/i.exec(header.trim());
   if (!match) return false;
@@ -32,7 +32,10 @@ type AuthorizeNetWebhook = {
 
 export async function POST(request: Request) {
   const rawBody = await request.text();
-  if (!validSignature(rawBody, request.headers.get('x-anet-signature'))) {
+  let config;
+  try { config = await getAuthorizeNetConfig(); }
+  catch (error) { console.error('Could not load Authorize.Net webhook settings:', error); return Response.json({ error: 'Webhook configuration is unavailable.' }, { status: 503 }); }
+  if (!validSignature(rawBody, request.headers.get('x-anet-signature'), config.signatureKey)) {
     return Response.json({ error: 'Webhook signature is invalid.' }, { status: 401 });
   }
   let event: AuthorizeNetWebhook;
@@ -63,12 +66,14 @@ export async function POST(request: Request) {
       try {
         const amount = Number(donation.amount).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
         const occurredAt = new Date(donation.createdAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' });
+        const isConfirmed = donation.status === 'completed';
+        const title = isConfirmed ? 'Donation confirmed' : `Donation ${donation.status}`;
         await sendEmail({
           to: alertEmailAddress(),
-          subject: `Donation confirmed: ${amount}`,
-          text: `Authorize.Net confirmed a donation of ${amount}.\nReference: ${donation.reference}\nTransaction: ${donation.transactionId ?? 'Not provided'}\nCheckout created: ${occurredAt} UTC`,
-          html: `<h2>Donation confirmed</h2><p><strong>Amount:</strong> ${escapeHtml(amount)}</p><p><strong>Reference:</strong> ${escapeHtml(donation.reference)}</p><p><strong>Transaction:</strong> ${escapeHtml(donation.transactionId ?? 'Not provided')}</p><p><strong>Checkout created:</strong> ${escapeHtml(occurredAt)} UTC</p>`,
-          idempotencyKey: `fha-donation-${donation.reference}`,
+          subject: `${title}: ${amount}`,
+          text: `${isConfirmed ? 'Authorize.Net confirmed' : `Authorize.Net marked as ${donation.status}`} a donation of ${amount}.\nReference: ${donation.reference}\nTransaction: ${donation.transactionId ?? 'Not provided'}\nCheckout created: ${occurredAt} UTC`,
+          html: brandedEmailHtml({ title, preheader: `${isConfirmed ? 'Confirmed gift' : `Payment status: ${donation.status}`} for ${amount}.`, content: `<p>${isConfirmed ? 'Authorize.Net confirmed a donation to Finding Hope Africa.' : `Authorize.Net reported a ${escapeHtml(donation.status)} payment. Please review the transaction in your payment dashboard if follow-up is needed.`}</p><table role="presentation" cellspacing="0" cellpadding="8" style="border-collapse:collapse;background:#f7f5f0;width:100%"><tr><td><strong>Amount</strong></td><td>${escapeHtml(amount)}</td></tr><tr><td><strong>Reference</strong></td><td>${escapeHtml(donation.reference)}</td></tr><tr><td><strong>Transaction</strong></td><td>${escapeHtml(donation.transactionId ?? 'Not provided')}</td></tr><tr><td><strong>Checkout created</strong></td><td>${escapeHtml(occurredAt)} UTC</td></tr></table>`, action: { label: 'Open admin dashboard', url: `${process.env.PUBLIC_SITE_URL?.replace(/\/$/, '') || 'https://findinghopeafrica.org'}/admin` } }),
+          idempotencyKey: `fha-donation-${donation.reference}-${donation.status}`,
         });
         await markDonationAlert(donation.reference);
       } catch (error) {

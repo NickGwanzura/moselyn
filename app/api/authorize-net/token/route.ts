@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createDonation, setDonationStatus } from '../../../../lib/backend-db';
+import { getAuthorizeNetConfig } from '../../../../lib/payment-settings';
 
 export const runtime = 'nodejs';
 
@@ -14,9 +15,13 @@ const PAYMENT_URLS = {
 } as const;
 
 export async function POST(request: Request) {
-  const loginId = process.env.AUTHORIZE_NET_API_LOGIN_ID;
-  const transactionKey = process.env.AUTHORIZE_NET_TRANSACTION_KEY;
-  const mode = process.env.AUTHORIZE_NET_MODE === 'production' ? 'production' : 'sandbox';
+  let settings: Awaited<ReturnType<typeof getAuthorizeNetConfig>>;
+  try { settings = await getAuthorizeNetConfig(); }
+  catch (error) {
+    console.error('Could not load Authorize.Net checkout settings:', error);
+    return Response.json({ error: 'Authorize.Net checkout settings are unavailable. Please contact us to arrange your donation.' }, { status: 503 });
+  }
+  const { apiLoginId: loginId, transactionKey, mode } = settings;
 
   if (!loginId || !transactionKey) {
     return Response.json({ error: 'Authorize.Net checkout is not configured yet. Please contact us to arrange your donation.' }, { status: 503 });

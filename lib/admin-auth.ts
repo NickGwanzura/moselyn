@@ -53,6 +53,14 @@ export async function verifyAdminSession(token: string | undefined): Promise<boo
   }
 }
 
+export function adminEmailFromSession(token: string | undefined): string {
+  try {
+    const payload = token?.split('.')[0];
+    const email = payload ? (JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { email?: unknown }).email : null;
+    return typeof email === 'string' ? email.trim().toLowerCase() : 'administrator';
+  } catch { return 'administrator'; }
+}
+
 export async function hasAdminSession(): Promise<boolean> {
   const cookieStore = await cookies();
   return verifyAdminSession(cookieStore.get(COOKIE_NAME)?.value);
