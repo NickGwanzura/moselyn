@@ -184,3 +184,5 @@ body{font-family:'General Sans',Arial,sans-serif}
 .footer-top{grid-template-columns:1.3fr .8fr 1fr 1.4fr}.footer-newsletter{min-width:0}
 @media(max-width:900px){.footer-top{grid-template-columns:1fr 1fr}.footer-top>div:first-child{grid-column:1/-1}}
 @media(max-width:600px){.footer-top{grid-template-columns:1fr}}
+.contact-details a,.contact-details p{display:flex;align-items:flex-start;gap:12px;margin:0}.contact-details svg{flex:0 0 19px;margin-top:4px;color:var(--terracotta)}
+.footer-nav a{display:flex;align-items:center;gap:10px}.footer-contact>a,.footer-contact>p:not(.eyebrow){display:flex;align-items:flex-start;gap:10px}.footer-nav svg,.footer-contact svg{flex:0 0 16px;color:var(--terracotta)}.footer-contact svg{margin-top:3px}
