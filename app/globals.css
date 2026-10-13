@@ -181,3 +181,6 @@ body{font-family:'General Sans',Arial,sans-serif}
 .hero h1,.page-hero h1,.blog-story-hero h1{font-family:'Quentin Script','Quentin',cursive;font-style:normal;font-weight:400;letter-spacing:0}
 
 .developer-pill{display:inline-flex;align-items:center;gap:5px;padding:6px 11px;border:1px solid #ded5ca;border-radius:999px;color:#71685f;font-size:10px;letter-spacing:.04em;line-height:1;white-space:nowrap}.developer-pill strong{color:var(--clay);font-weight:700}
+.footer-top{grid-template-columns:1.3fr .8fr 1fr 1.4fr}.footer-newsletter{min-width:0}
+@media(max-width:900px){.footer-top{grid-template-columns:1fr 1fr}.footer-top>div:first-child{grid-column:1/-1}}
+@media(max-width:600px){.footer-top{grid-template-columns:1fr}}
